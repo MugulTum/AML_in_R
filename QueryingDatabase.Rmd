@@ -1,0 +1,431 @@
+---
+title: "QueryingDatabase"
+author: "Silvester Cheptumo"
+date: "2023-07-16"
+output: html_document
+
+
+---
+```{r}
+library(DBI)
+library(RMySQL)
+```
+```{r}
+library(dplyr)
+library(lubridate)
+
+```
+#Rule1SQL
+```{r}
+con<-dbConnect(MySQL(),
+                user="Kaimugul",
+                password="Kabon@123#",
+                dbname="Banking",
+                host="127.0.0.1")
+# Query the MySQL table
+query <- "SELECT *
+          FROM core_transactions
+          WHERE trans_date = '2021-10-21'
+          AND amount > 1000000;"
+result <- dbGetQuery(con, query)
+print(result)
+
+dbDisconnect(con)
+```
+#Rule1R language
+```{R}
+con<-dbConnect(MySQL(),
+                user="Kaimugul",
+                password="Kabon@123#",
+                dbname="Banking",
+                host="127.0.0.1")
+#loading relevant transactions 
+library(dplyr)
+library(lubridate)
+# Identify the transactions table
+transactions_table <- "core_transactions"
+
+# Load the data from MySQL for a given day
+date <- "2021-10-21"
+transactions_df <- dbGetQuery(con, paste0("select * from ", transactions_table, " where trans_date = '", date, "'"))
+
+# Filter the data with transaction amount > 1 million
+transactions_df <- transactions_df %>% filter(amount > 1000000)
+
+# Save the dataframe in a folder
+saveRDS(transactions_df, file = paste0("transactions_", date, ".rds"))
+```
+ 
+#Rule2 R language
+```{r}
+con <-dbConnect(MySQL(),
+                user="Kaimugul",
+                password="Kabon@123#",
+                dbname="Banking",
+                host="127.0.0.1")
+# identifying transactions table 
+rule2<- "core_transactions"
+rule2date<- "2021-10-21"
+transactions_dfrule2 <- dbGetQuery(con, paste0("SELECT * FROM ", transactions_table, " where trans_date = '", date, "'"))
+
+# Calculate average transaction value per customer
+avg_transaction_per_customer <- transactions_dfrule2 %>%
+  group_by(cust_id) %>%
+  summarise(avg_transaction = mean(amount, na.rm = TRUE))
+
+
+# Find total transaction value (debits) for each customer on the selected day
+total_transaction_per_customer <- transactions_dfrule2 %>%
+  filter(trans_date == rule2date) %>%
+  group_by(cust_id) %>%
+  summarise(total_transaction_value = sum(amount))
+
+# Right join avg_transaction_per_customer and total_transaction_per_customer data.frames
+merged_data <- right_join(avg_transaction_per_customer, total_transaction_per_customer, by = "cust_id")
+
+# Calculate deviation percentage
+merged_data <- merged_data %>%
+  mutate(deviation_percentage = ((total_transaction_value - avg_transaction) * 100 / avg_transaction))
+
+# Filter customers whose deviation is more than 100%
+filtered_data <- merged_data %>%
+  filter(deviation_percentage > 100)
+
+saveRDS(transactions_dfrule2, file = paste0("transactionsrule2_", rule2date, ".rds"))
+```
+#Rule3 R language
+```{r}
+rule3date<-'2021-10-21'
+
+# Load past 95 days data from the database
+rule3 <- dbGetQuery(con, paste0("SELECT * FROM ", transactions_table, " WHERE trans_date >= '", rule3date, "'"))
+
+#Convert the date columns to the proper date format
+rule3$trans_date <- as.Date(rule3$trans_date)
+
+# Check the first day of transaction & last day of transaction
+transactions_rule3 <- rule3 %>%
+  group_by(cust_id) %>%
+  mutate(first_transaction_date = min(trans_date),
+         last_transaction_date = max(trans_date)) %>%
+  ungroup()
+
+# Find number of days between first & last day
+transactions_rule3 <- transactions_rule3 %>%
+  mutate(days_inactive = as.numeric(last_transaction_date - first_transaction_date))
+
+# If it is greater than 90 days, then save and report
+inactive_customers_df <- transactions_rule3 %>%
+  filter(days_inactive > 90)
+
+# Save dataframe in a folder
+saveRDS(inactive_customers_df, file = "inactive_customers.rds")
+
+```
+```{r}
+# Load past 95 days data from the database
+rule3 <- dbGetQuery(con, paste0("SELECT * FROM ", transactions_table, " WHERE trans_date >= '", rule3date, "'"))
+
+# Convert the date columns to the proper date format
+rule3$trans_date <- as.Date(rule3$trans_date)
+
+# Check the first day of transaction & last day of transaction
+transactions_rule3 <- rule3 %>%
+  group_by(cust_id) %>%
+  mutate(first_transaction_date = min(trans_date),
+         last_transaction_date = max(trans_date)) %>%
+  ungroup()
+
+# Convert the first_transaction_date and last_transaction_date to proper date format
+transactions_rule3$first_transaction_date <- as.Date(transactions_rule3$first_transaction_date)
+transactions_rule3$last_transaction_date <- as.Date(transactions_rule3$last_transaction_date)
+
+# Calculate the difference in months between the last transaction date and selected date
+transactions_rule3$months_inactive <- as.numeric(difftime(rule3date, transactions_rule3$last_transaction_date, units = "days") / 30)
+
+# Filter out customers who have been inactive for exactly 3 months
+inactive_customers_df <- transactions_rule3 %>%
+  filter(months_inactive == 3)
+
+# Save dataframe in a folder
+saveRDS(inactive_customers_df, file = "rule3.rds")
+
+```
+
+```{r}
+# identifying transactions table 
+rule4<- "core_transactions"
+rule4date<- "2021-10-21"
+transactions_df <- dbGetQuery(con, paste0("SELECT * FROM ", transactions_table, " where trans_date = '", date, "'"))
+# Function to identify customers with high transaction volume for a given day
+identify_high_transaction_volume_customers <- function(transactions_df, date) {
+  # Filter transactions dataframe for the given day
+  filtered_transactions <- transactions_df %>%
+    filter(trans_date == as.Date(date))
+
+  # Group transactions by customer ID and calculate total transaction amount for each customer
+  total_transaction_amount_df <- filtered_transactions %>%
+    group_by(cust_id) %>%
+    summarize(total_transaction_amount = sum(amount))
+
+  # Filter customers whose total transaction amount is greater than 1 million
+  high_transaction_volume_customers <- total_transaction_amount_df %>%
+    filter(total_transaction_amount > 1000000)
+
+  return(high_transaction_volume_customers)
+}
+
+# Assuming you have loaded the transactions data into a dataframe named 'transactions_df'
+# And you have provided the date for which you want to find high transaction volume customers
+date <- "2023-07-24"
+
+# Call the function to identify high transaction volume customers for the given date
+high_transaction_volume_customers <- identify_high_transaction_volume_customers(transactions_df, date)
+
+# Save the result in RDS format
+saveRDS(high_transaction_volume_customers, file = paste0("high_transaction_volume_customers_", date, ".rds"))
+
+# Print the list of high transaction volume customers for the given date
+print(high_transaction_volume_customers)
+```
+
+
+#Rule4
+```{r}
+# identifying transactions table 
+rule4<- "core_transactions"
+rule4date<- "2021-10-21"
+transactions_dfrule4 <- dbGetQuery(con, paste0("SELECT * FROM ", transactions_table, " where trans_date = '", date, "'"))
+
+# Define the function to identify customers with high transaction volume
+identify_customers_with_high_transaction_volume <- function(transactions_dfrule4, date) {
+  # Filter the transactions dataframe to only include transactions on the given day
+  filtered_transactions_df <- transactions_dfrule4 %>%
+    filter(transaction_date == date)
+
+  # Group the transactions by customer ID and calculate the total transaction amount for each customer
+  total_transaction_amount_df <- filtered_transactions_df %>%
+    group_by(cust_id) %>%
+    summarize(total_transaction_amount = sum(amount))
+
+  # Filter the results to only include customers whose total transaction amount is greater than 1 million
+  high_transaction_volume_customers <- total_transaction_amount_df %>%
+    filter(total_transaction_amount > 1000000)
+
+  # Return the list of high transaction volume customers
+  return(high_transaction_volume_customers)
+}
+
+# Identify customers with high transaction volume on the given day
+high_transaction_volume_customers <- identify_customers_with_high_transaction_volume(transactions_dfrule4 = , "2023-10-21")
+
+# Save the result in RDS format
+saveRDS(high_transaction_volume_customers, file = "high_transaction_volume_customers.rds")
+
+```
+
+```{r}
+con <-dbConnect(MySQL(),
+                user="Kaimugul",
+                password="Kabon@123#",
+                dbname="Banking",
+                host="127.0.0.1")
+rule5<- "core_transactions"
+rule5date<- "2021-10-21"
+transactions_df <- dbGetQuery(con, paste0("SELECT * FROM ", rule5 table, " where trans_date = '", rule5date, "'"))
+
+# Define the function to identify customers with high transaction volume over three consecutive days
+identify_customers_with_high_transaction_volume <- function(transactions_df) {
+  # Convert the transaction_date column to Date format
+  transactions_df$trans_date <- as.Date(transactions_df$trans_date)
+
+  # Sort the transactions data frame by cust_id and trans_date
+  sorted_transactions_df <- transactions_df %>%
+    arrange(cust_id, trans_date)
+
+  # Group the transactions by cust_id and trans_date and calculate the cumulative transaction amount for each customer on each day
+  cumulative_transactions_df <- sorted_transactions_df %>%
+    group_by(cust_id, trans_date) %>%
+    summarize(cumulative_amount = sum(amount)) %>%
+    ungroup()
+
+  # Create a window of three consecutive days for each customer
+  windowed_transactions_df <- cumulative_transactions_df %>%
+    group_by(cust_id) %>%
+    mutate(window_sum = cumsum(cumulative_amount) - lag(cumulative_amount, default = 0))
+
+  # Filter the results to include customers whose cumulative transaction amount is greater than 1 million over three consecutive days
+  high_transaction_volume_customers <- windowed_transactions_df %>%
+    filter(window_sum > 1000000)
+
+  # Return the list of high transaction volume customers
+  return(high_transaction_volume_customers)
+}
+
+# Assuming you have a data frame named transactions_df containing columns: cust_id, trans_date, amount
+
+# Identify customers with high transaction volume over three consecutive days
+high_transaction_volume_customers <- identify_customers_with_high_transaction_volume(transactions_df)
+
+# Save the result in RDS format
+saveRDS(high_transaction_volume_customers, file = "rule51.rds")
+
+```
+
+
+
+
+
+
+
+```
+
+
+#Rule2
+```{R}
+con <-dbConnect(MySQL(),
+                user="Kaimugul",
+                password="Kabon@123#",
+                dbname="Banking",
+                host="127.0.0.1")
+#Query the MYSQL table
+query<-"WITH avg_transaction_value AS (
+   SELECT cust_id, AVG(amount) AS avg_transaction_value
+   FROM core_transactions
+   GROUP BY cust_id
+)
+SELECT core_transactions.cust_id, amount,
+       ABS(amount - avg_transaction_value) * 100 AS deviation_percentage
+FROM core_transactions
+JOIN avg_transaction_value ON core_transactions.cust_id = avg_transaction_value.cust_id
+WHERE ABS(amount - avg_transaction_value) * 100 > 100;"
+results21<-dbGetQuery(con, query)
+print(results21)
+
+dbDisconnect(con)
+```
+#Rule3
+#rule4
+```{r}
+con <-dbConnect(MySQL(),
+                user="Kaimugul",
+                password="Kabon@123#",
+                dbname="Banking",
+                host="127.0.0.1")
+# Query the MySQL table
+query <- "select total_daily_transactions, cust_id
+from 
+        (SELECT cust_id, trans_date, count(*) AS num_transactions, sum(amount) as total_daily_transactions
+          FROM core_transactions
+          GROUP BY cust_id, trans_date) AS daily_transaction_summary
+          where total_daily_transactions > 1000000
+          and trans_date = '2021-10-31'
+          limit 10;"
+
+result4 <- dbGetQuery(con, query)
+print(result4)
+
+dbDisconnect(con)
+```
+#Rule5
+```{r}
+con <-dbConnect(MySQL(),
+                user="Kaimugul",
+                password="Kabon@123#",
+                dbname="Banking",
+                host="127.0.0.1")
+# Query the MySQL table
+query <- "SELECT cust_id, total_transactions
+FROM (
+    SELECT cust_id, sum(amount) AS total_transactions, date(trans_date) AS transaction_date
+    FROM core_transactions
+    GROUP BY cust_id, transaction_date
+    ORDER BY cust_id, transaction_date
+) AS transaction_summary
+WHERE total_transactions > 1000000 
+  AND transaction_date BETWEEN DATE_SUB('2023-04-04', INTERVAL 3 DAY) AND '2023-04-04';
+"
+result5 <- dbGetQuery(con, query)
+print(result5)
+
+dbDisconnect(con)
+```
+#Rule6
+```{r}
+con <-dbConnect(MySQL(),
+                user="Kaimugul",
+                password="Kabon@123#",
+                dbname="Banking",
+                host="127.0.0.1")
+# Query the MySQL table
+query <- "SELECT cust_id, customer_transactions
+FROM (
+    SELECT cust_id, sum(amount) AS customer_transactions, date(trans_date) AS transaction_date
+    FROM core_transactions
+    GROUP BY cust_id, transaction_date
+    ORDER BY cust_id, transaction_date
+) AS transaction_summary
+WHERE customer_transactions > 2000000 
+  AND transaction_date BETWEEN DATE_SUB('2022-02-07', INTERVAL 1 week) AND '2022-02-07';
+"
+result6 <- dbGetQuery(con, query)
+print(result6)
+
+dbDisconnect(con)
+```
+
+
+
+
+
+#Rule7
+```{r}
+con <-dbConnect(MySQL(),
+                user="Kaimugul",
+                password="Kabon@123#",
+                dbname="Banking",
+                host="127.0.0.1")
+# Query the MySQL table
+query <- "WITH average_monthly_transactions AS (
+    SELECT
+        cust_id,
+        AVG(amount) AS monthly_transaction
+    FROM core_transactions
+    WHERE trans_date >= '2023-06-25' - INTERVAL 6 MONTH
+    GROUP BY cust_id
+),
+current_month_transactions AS (
+    SELECT
+        cust_id,
+        SUM(amount) AS total_transaction_amount
+    FROM core_transactions
+    WHERE trans_date >= '2023-06-25'
+    GROUP BY cust_id
+)
+SELECT
+    c1.cust_id,
+    total_transaction_amount,
+    monthly_transaction,
+    ((total_transaction_amount - monthly_transaction) * 100 / monthly_transaction) AS deviation_percentage
+FROM current_month_transactions AS c1
+JOIN average_monthly_transactions AS c2 ON c1.cust_id = c2.cust_id
+WHERE ((total_transaction_amount - monthly_transaction) * 100 / monthly_transaction) > 100;"
+results1 <- dbGetQuery(con, query)
+print(results1)
+
+dbDisconnect(con)
+```
+
+```{R}
+con <-dbConnect(MySQL(),
+                user="Kaimugul",
+                password="Kabon@123#",
+                dbname="Banking",
+                host="127.0.0.1")
+#loading R libraries
+library(dplyr)
+library(lubridate)
+#selecting my month
+month<-'2023-06'
+#identifying total transactions customers did 
+```
